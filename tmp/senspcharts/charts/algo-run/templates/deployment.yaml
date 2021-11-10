@@ -1,0 +1,267 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "algo-run.fullname" . }}
+  labels:
+    {{- include "algo-run.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "algo-run.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "algo-run.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "algo-run.serviceAccountName" . }}
+      hostPID: true
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+      {{- if .Values.gcspull.enabled }}
+        - name: {{ .Chart.Name }}-gcspull
+          image: "{{ .Values.gcspull.repository }}:{{ .Values.gcspull.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.gcspull.pullPolicy }}
+          volumeMounts:
+          - name: inp-vol
+            mountPath: /opt/sensoriant/gcs/pull/filesFromBucket
+          - name: ds-vol
+            mountPath: /opt/sensoriant/gcs/pull/datasets
+          - name: cm-vol
+            mountPath: /opt/sensoriant/gcs/pull/credentials
+          - name: scr-vol
+            mountPath: /pscripts
+          - name: log-vol
+            mountPath: /plogs
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.gcspull.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: GCS_OBJECT_PREFIX
+              value: {{ .Values.inputdsname }}
+            - name: CURRENT_PIPELINE
+              value: {{ .Values.pipelineid }}
+            {{- range $key, $value := .Values.gcspull.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.gcspull.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          command: ["/bin/bash", "-c"]
+          args: 
+            - |
+              echo Pulling input data
+              /pscripts/pmgrcmd.sh setstarted pullinput
+              rm -f /opt/sensoriant/gcs/pull/filesFromBucket/* /opt/sensoriant/gcs/pull/filesFromBucket/.gitignore
+              /opt/sensoriant/gcs/pull/start.sh
+              rc=$?
+              /pscripts/pmgrcmd.sh setcompleted pullinput $rc
+              if [ $rc -ne 0 ]; then 
+                 /plogs/writelog.sh ERROR PULL_INPUT_FILES_FROM_GCS "Return Code from SensGcsPull = $rc"
+              else 
+                 /plogs/writelog.sh SUCCESS PULL_INPUT_FILES_FROM_GCS ${GCS_OBJECT_PREFIX}
+              fi
+              echo Done pulling input data
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
+        - name: {{ .Chart.Name }}-init
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.algoinit.repository }}:{{ .Values.algoinit.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.algoinit.pullPolicy }}
+          volumeMounts:
+          - name: scr-vol
+            mountPath: /pscripts
+          env:
+            {{- range $key, $value := .Values.algoinit.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.algoinit.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.algoinit.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          command: ["/bin/bash"]
+          args: ["-c", "/pscripts/pmgrcmd.sh getcompleted decrypt 0; sleep 5"]
+      containers:
+        - name: {{ .Chart.Name }}-algo
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.algo.repository }}:{{ .Values.algo.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.algo.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.algo.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: SCONE_CAS_ADDR
+              value: {{ .Values.sconecasaddr }}
+            - name: CURRENT_PIPELINE
+              value: {{ .Values.pipelineid }}
+            - name: SCONE_CONFIG_ID
+              value: {{ .Values.pipelineid }}-algorithm_policy/algorithm
+            - name: SCONE_LAS_ADDR
+              value: {{ .Values.sconelasaddr }}
+            {{- range $key, $value := .Values.algo.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          volumeMounts:
+            - name: dev-isgx
+              mountPath: /dev/isgx
+            - name: dev-gsgx
+              mountPath: /dev/gsgx
+            - name: inp-vol
+              mountPath: /algorithm-input
+            - name: out-vol
+              mountPath: /algorithm-output
+            - name: scr-vol
+              mountPath: /pscripts
+            - name: log-vol
+              mountPath: /plogs
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          command: ["/bin/bash", "-c"]
+          args: 
+            - |
+              /pscripts/pmgrcmd.sh setstarted mralgo
+              mra=$(/root/miniconda/bin/python3 /app/$ALGORITHM_ENTRYPOINT --output /algorithm-output)
+              /pscripts/pmgrcmd.sh setcompleted mralgo $? mracalcdone $mra
+              /pscripts/pmgrcmd.sh setstarted algo uploadpolicy
+              unset SCONE_HASH
+              /root/miniconda/bin/python3 /app/$ALGORITHM_ENTRYPOINT --output /algorithm-output
+              rc=$?
+              /pscripts/pmgrcmd.sh setcompleted algo $rc
+              if [ $rc -ne 0 ]; then 
+                 /plogs/writelog.sh ERROR RUN_ALGORITHM "Return Code from algorithm-$SCONE_MODE = $rc"
+              else 
+                 /plogs/writelog.sh SUCCESS RUN_ALGORITHM algorithm-$SCONE_MODE
+              fi
+              /pscripts/pmgrcmd.sh endloop
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.gcspush.enabled }}
+        - name: {{ .Chart.Name }}-gcspush
+          image: "{{ .Values.gcspush.repository }}:{{ .Values.gcspush.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.gcspush.pullPolicy }}
+          volumeMounts:
+          - name: inp-vol
+            mountPath: /flags
+          - name: out-vol
+            mountPath: /opt/sensoriant/gcs/push/filesToBucket
+          - name: ds-vol
+            mountPath: /opt/sensoriant/gcs/push/datasets
+          - name: cm-vol
+            mountPath: /opt/sensoriant/gcs/push/credentials
+          - name: scr-vol
+            mountPath: /pscripts
+          - name: log-vol
+            mountPath: /plogs
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.gcspush.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: CURRENT_PIPELINE
+              value: {{ .Values.pipelineid }}
+            - name: GCS_OBJECT_PREFIX
+              value: {{ printf "%s-%s" .Values.pipelineid .Values.outputdsname }}
+            {{- range $key, $value := .Values.gcspush.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.gcspush.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          command: ["/bin/bash", "-c"]
+          args: 
+            - |
+              /pscripts/pmgrcmd.sh setstarted pushoutput algo
+              /opt/sensoriant/gcs/push/start.sh
+              rc=$?
+              echo Done pushing output data
+              rm -f /opt/sensoriant/gcs/push/filesToBucket/* /flags/*
+              /pscripts/pmgrcmd.sh setcompleted pushoutput $rc
+              if [ $rc -ne 0 ]; then 
+                 /plogs/writelog.sh ERROR PUSH_OUTPUT_FILES_TO_GCS "Return Code from SensGcsPush = $rc"
+              else 
+                 /plogs/writelog.sh SUCCESS PUSH_OUTPUT_FILES_TO_GCS ${GCS_OBJECT_PREFIX}
+              fi
+              /pscripts/pmgrcmd.sh endloop
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
+      volumes:
+        - name: dev-isgx
+          hostPath:
+            path: /dev/isgx
+        - name: dev-gsgx
+          hostPath:
+            path: /dev/gsgx
+        - name: inp-vol
+          hostPath:
+            path: /home/azureuser/algoinput
+        - name: out-vol
+          hostPath:
+            path: /home/azureuser/algooutput
+        - name: ds-vol
+          hostPath:
+            path: /home/azureuser/datasets
+        - name: cm-vol
+          configMap:
+            name: api-cfg
+        - name: scr-vol
+          configMap:
+            name: pmgr-script
+            defaultMode: 0755
+        - name: log-vol
+          configMap:
+            name: wlog-script
+            defaultMode: 0755
+            #- name: docker-vol
+            #hostPath:
+            #path: /var/run/docker.sock
+            #type: File
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: testds
+spec:
+  selector:
+    matchLabels:
+      name: testdsspec
+  template:
+    metadata:
+      labels:
+        name: testdsspec
+    spec:
+      imagePullSecrets:
+        - name: sens-reg-cred
+      containers:
+        - name: testds
+          #image: sboxregistry:5000/bash:test1
+          #image: sboxregistry:5000/sensetest/testimagev1:testv1_2037677
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash"]
+          args: ["-c", "while true; do echo hello from algo; sleep 10;done"]
+      nodeSelector:
+        senssspmode: enabled
+    

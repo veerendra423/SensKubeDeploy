@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sens-rls.fullname" . }}
+  labels:
+    {{- include "sens-rls.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: 9202
+      targetPort: http1
+      protocol: TCP
+      name: http1
+  selector:
+    {{- include "sens-rls.selectorLabels" . | nindent 4 }}

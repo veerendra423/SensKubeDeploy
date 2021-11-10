@@ -1,0 +1,115 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sens-api.fullname" . }}
+  labels:
+    {{- include "sens-api.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sens-api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sens-api.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sens-api.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: cm-vol
+          configMap:
+            name: api-cfg
+      initContainers:
+        - name: check-mdb
+          #image: sensoriant.azurecr.io/dev/minlin:latest
+          image: "{{ .Values.checkmdb.repository }}:{{ .Values.checkmdb.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.checkmdb.pullPolicy }}
+          command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo abc | curl  -s telnet://{{ .Release.Name }}-{{ .Values.checkmdb.dbname }}:{{ .Values.checkmdb.dbport }} --output /dev/null; if [ $? != 0 ]; then echo waiting for db; else echo db ready; exit 0; fi; done; echo no db; exit 1"]
+      containers:
+        - name: {{ .Chart.Name }}-server
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.apiserver.repository }}:{{ .Values.apiserver.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.apiserver.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.apiserver.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.apiserver.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            - name: SECURE_CLOUD_API_SENSCLI_API_ENDPOINT
+              value: "http://localhost:{{ .Values.scli.containerPort }}/senscli_api/v1"
+            - name: SECURE_CLOUD_API_LLS_ENDPOINT
+              value: "http://s1-ctrl-lls:9102/auditLogger/v1"
+            - name: SECURE_CLOUD_API_RLS_ENDPOINT
+              value: "http://s1-ctrl-rls:9202/rls/v1"
+
+          volumeMounts:
+          - name: cm-vol
+            mountPath: /opt/sensoriant/secure-cloud/api/credentials
+          ports:
+            - name: http
+              containerPort: {{ .Values.apiserver.containerPort }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      {{- if .Values.scli.enabled }}
+        - name: {{ .Chart.Name }}-scli
+          image: "{{ .Values.scli.repository }}:{{ .Values.scli.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.scli.pullPolicy }}
+          volumeMounts:
+          - name: cm-vol
+            mountPath: /opt/creds
+          ports:
+            - name: http
+              containerPort: {{ .Values.scli.containerPort }}
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.scli.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.scli.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          args:
+          - "sensec"
+          - "-http"
+          - "5006"
+      {{- end }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+
+

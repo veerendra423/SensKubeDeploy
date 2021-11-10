@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "algo-run.fullname" . }}-test-connection"
+  labels:
+    {{- include "algo-run.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "algo-run.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never

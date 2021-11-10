@@ -1,0 +1,8 @@
+
+          volumeMounts:
+            - name: cm-vol
+                mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: cm-vol
+          configMap:
+            name: mdb-cfg

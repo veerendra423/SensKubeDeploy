@@ -1,0 +1,90 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sens-rls.fullname" . }}
+  labels:
+    {{- include "sens-rls.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sens-rls.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sens-rls.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sens-rls.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: dev-tpm0
+              mountPath: /dev/tpm0
+            - name: dev-tpmrm0
+              mountPath: /dev/tpmrm0
+            - name: sys
+              mountPath: /sys
+            - name: app
+              mountPath: /app
+          ports:
+            - name: http
+              containerPort: {{ .Values.image.containerPort }}
+              protocol: TCP
+            - name: http1
+              containerPort: 9202
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.image.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          command: ["bash", "-c"]
+          args:
+           - "/SensRLS/SensRLS -httpMode=mtls -port=$SENSRLS_MTLS_PORT -apiHttpMode=http -apiPort=$SENSRLS_API_PORT -certFile=/SensRLS/rlsCert.pem -keyFile=/SensRLS/rlsKey.pem -apiCertFile=apiRLSCert.pem -apiKeyFile=apiRLSKey.pem"
+      {{- with .Values.nodeSelector }}
+      volumes:
+        - name: dev-tpm0
+          hostPath:
+            path: /dev/tpm0
+        - name: dev-tpmrm0
+          hostPath:
+            path: /dev/tpmrm0
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: app
+          emptyDir: {}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,189 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "algo-prep.fullname" . }}
+  labels:
+    {{- include "algo-prep.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "algo-prep.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "algo-prep.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "algo-prep.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      volumes:
+        - name: data-vol
+          emptyDir: {}
+        - name: json-vol
+          configMap:
+            name: aprep-cfg
+        - name: reg-cert
+          configMap:
+            name: cert-cfg
+        - name: scr-vol
+          configMap:
+            name: pmgr-script
+            defaultMode: 0755
+        - name: log-vol
+          configMap:
+            name: wlog-script
+            defaultMode: 0755
+        - name: ds-vol
+          hostPath:
+            path: /home/azureuser/datasets
+      containers:
+        - name: {{ .Chart.Name }}-aprep
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.aprep.repository }}:{{ .Values.aprep.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.aprep.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.aprep.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: SECURE_CLOUD_API_SERVER_IP
+              value: {{ .Values.cloudapiserver }}
+            - name: CURRENT_PIPELINE
+              value: {{ .Values.pipelineid }}
+            - name: CAS_IP_ADDR
+              value: {{ .Values.sconecasaddr }}
+            {{- range $key, $value := .Values.aprep.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.aprep.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          volumeMounts:
+          - name: data-vol
+            mountPath: /opt/default/app/operator/SensADK/sandbox/image/sdata/default
+          - name: json-vol
+            mountPath: /pipelinejson
+          - name: ds-vol
+            mountPath: /datasets
+          - name: scr-vol
+            mountPath: /pscripts
+          - name: log-vol
+            mountPath: /plogs
+          command: ["/bin/sh", "-c"]
+          args: ["cd /opt/default/app/; cp /plogs/writelog.sh . ; chmod +x ./writelog.sh ; ./run.sh /pipelinejson/pipeline.json"]
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.scli.enabled }}
+        - name: {{ .Chart.Name }}-scli
+          image: "{{ .Values.scli.repository }}:{{ .Values.scli.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.scli.pullPolicy }}
+          volumeMounts:
+          - name: data-vol
+            mountPath: /algo/default
+          - name: reg-cert
+            mountPath: /opt/cert
+          ports:
+            - name: http
+              containerPort: {{ .Values.scli.containerPort }}
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.scli.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: SBOX_REGISTRY_IP
+              value: {{ .Values.localregaddr }}
+            {{- range $key, $value := .Values.scli.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.scli.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          command: ["/bin/bash"]
+          args: ["-c", "sleep 2; ./aprepstart.sh sensec -http 5006"]
+      {{- end }}
+      {{- if .Values.policyup.enabled }}
+        - name: {{ .Chart.Name }}-policyup
+          image: "{{ .Values.policyup.repository }}:{{ .Values.policyup.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.policyup.pullPolicy }}
+          command: ["/bin/bash", "-c"]
+          args: 
+            - |
+              /pscripts/pmgrcmd.sh setstarted uploadpolicy createpolicy
+              mkdir -p ~/.cas
+              cd /policies
+              ./upload_policies.sh
+              rc=$?
+              /pscripts/pmgrcmd.sh setcompleted uploadpolicy $rc
+              if [ $rc -ne 0 ]; then 
+                 /plogs/writelog.sh ERROR UPLOAD_POLICIES "Return Code from upload_policies.sh = $rc"
+              else 
+                 /plogs/writelog.sh SUCCESS UPLOAD_POLICIES
+              fi
+              /pscripts/pmgrcmd.sh endloop
+          volumeMounts:
+          - name: data-vol
+            mountPath: /conf
+          - name: scr-vol
+            mountPath: /pscripts
+          - name: log-vol
+            mountPath: /plogs
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.policyup.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: CURRENT_PIPELINE
+              value: {{ .Values.pipelineid }}
+            - name: SCONE_CAS_ADDR
+              value: {{ .Values.sconecasaddr }}
+            {{- range $key, $value := .Values.policyup.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.policyup.parentEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Values.parentchartrel }}-{{ $value }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

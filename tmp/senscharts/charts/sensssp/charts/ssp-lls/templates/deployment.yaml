@@ -1,0 +1,89 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ssp-lls.fullname" . }}
+  labels:
+    {{- include "ssp-lls.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ssp-lls.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ssp-lls.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ssp-lls.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+            - name: dev-tpm0
+              mountPath: /dev/tpm0
+            - name: dev-tpmrm0
+              mountPath: /dev/tpmrm0
+            - name: sys
+              mountPath: /sys
+            - name: app
+              mountPath: /app
+          ports:
+            - name: http
+              containerPort: {{ .Values.image.containerPort }}
+              protocol: TCP
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.image.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.image.urlEnv }}
+            - name: {{ $key }}
+              value: http://{{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          command: ["bash", "-c", "sleep 30; /SensLLS/SensLLS -httpMode=http -port=$SENSLLS_PORT -rlsApiCall=$SENSRLS_URL:$SENSRLS_MTLS_PORT/rls/v1 -rlsCertFile=/SensLLS/rlsCert.pem -rlsKeyFile=/SensLLS/rlsKey.pem"]
+      volumes:
+        - name: dev-tpm0
+          hostPath:
+            path: /dev/tpm0
+        - name: dev-tpmrm0
+          hostPath:
+            path: /dev/tpmrm0
+        - name: sys
+          hostPath:
+            path: /sys
+        - name: app
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

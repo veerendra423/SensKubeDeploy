@@ -1,0 +1,21 @@
+{{- if .Values.svcenabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sens-cas.fullname" . }}
+  labels:
+    {{- include "sens-cas.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: {{ .Values.service.targetPort }}
+      protocol: TCP
+      name: http
+    - port: 8081
+      targetPort: 8081
+      protocol: TCP
+      name: http1
+  selector:
+    {{- include "sens-cas.selectorLabels" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,26 @@
+version: '3.4'
+services:
+    las:
+        image: $SKIF_LAS_IMAGENAME:$SKIF_LAS_TAG
+        devices:
+         - "/dev/isgx"
+        networks:
+          netxxx:
+    cas:
+        image: $SKIF_CAS_IMAGENAME:$SKIF_CAS_TAG
+        #command: cas -c /etc/cas/cas.toml
+        devices:
+         - "/dev/isgx"
+        volumes:
+         - ./cas-availability-config.toml:/etc/cas/cas.toml
+         - ./cas-owner-config-with-audit.toml:/etc/cas/cas-default-owner-config.toml
+        ports:
+          - $SKIF_CASATTEST_PORT:18765
+          - $SKIF_CASAPI_PORT:8081
+        depends_on:
+         - las
+        networks:
+          netxxx:
+networks:
+  netxxx:
+    external: true

@@ -1,0 +1,74 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ssp-ras.fullname" . }}
+  labels:
+    {{- include "ssp-ras.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "ssp-ras.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ssp-ras.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "ssp-ras.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: checksspsenslas
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo {{ .Release.Name }}-{{ .Values.checksspsenslas.name }}:{{ .Values.checksspsenslas.port }} ; echo exit | curl  -s telnet://{{ .Release.Name }}-{{ .Values.checksspsenslas.name }}:{{ .Values.checksspsenslas.port }} --output /dev/null; if [ $? != 0 ]; then echo waiting for senslas; else echo senslas ready; exit 0; fi; done; echo no senslas; exit 1"]
+        - name: checkrasserver
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo {{ .Release.Name }}-{{ .Values.checkrasserver.name }}:{{ .Values.checkrasserver.port }} ; echo exit | curl  -s telnet://{{ .Release.Name }}-{{ .Values.checkrasserver.name }}:{{ .Values.checkrasserver.port }} --output /dev/null; if [ $? != 0 ]; then echo waiting for rasserver; else echo rasserver ready; exit 0; fi; done; echo no rasserver; exit 1"]
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.image.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+
+

@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sens-pmgr.fullname" . }}
+  labels:
+    {{- include "sens-pmgr.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sens-pmgr.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sens-pmgr.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sens-pmgr.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+          command: ["/bin/sh"]
+          args: ["-c", "sudo service ssh start; ./genenv.sh; ./run_prefect_agent.sh; ./pmgrsrv "]
+          #args: ["-c", "sudo service ssh start; echo export KUBERNETES_SERVICE_HOST=$KUBERNETES_SERVICE_HOST > kh.info; echo export SENSPMGR_HOST=$SENSPMGR_HOST >> kh.info; echo export SENSPMGR_PORT=$SENSPMGR_PORT >> kh.info; echo source './prefect.env' >> kh.info; echo export USE_PREFECT=$USE_PREFECT >> kh.info; ./run_prefect_agent.sh; ./pmgrsrv "]
+          #args: ["-c", "sudo service ssh start; nohup ./run_prefect_agent.sh& ; echo export KUBERNETES_SERVICE_HOST=$KUBERNETES_SERVICE_HOST > kh.info; while true; do echo pmgr hello; sleep 1000;done"]
+          #args: ["-c", "sudo service ssh start"]
+          volumeMounts:
+          - name: sensenv-vol
+            mountPath: /sensenv
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            - name: ssh
+              containerPort: 22
+              protocol: TCP
+          {{- if .Values.image.probes }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: sensenv-vol
+          configMap:
+            name: sens-env
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

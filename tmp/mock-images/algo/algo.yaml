@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: testalgo
+spec:
+  containers:
+    - name: testalgo
+      image: sboxregistry:5000/bash:test1
+      command: ["bash"]
+      args: ["-c", "while true; do echo hello from algo; sleep 10;done"]
+      #  initContainers:
+      #- name: init-myservice
+      #image: busybox:1.28
+      #command: ["sh","-c", "while true; do echo hello from busybox; sleep 10;done"]
+

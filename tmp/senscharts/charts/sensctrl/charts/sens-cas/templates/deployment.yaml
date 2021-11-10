@@ -1,0 +1,123 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sens-cas.fullname" . }}
+  labels:
+    {{- include "sens-cas.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sens-cas.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sens-cas.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sens-cas.serviceAccountName" . }}
+      #hostPID: true
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: wait-for-rls
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash", "-c"]
+          args:
+            - |
+              while true;
+              do
+                (echo > /dev/tcp/{{ .Release.Name }}-ctrl-rls/9201) >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                   sleep 2;
+                   echo waiting for rls to be up
+                   continue
+                fi
+                echo rls is up
+                break
+              done
+        - name: wait-for-las
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          #command: ["bash", "-c", "sleep 45; echo done waiting for las; exit 0"]
+          command: ["bash", "-c"]
+          args:
+            - |
+              while true;
+              do
+                (echo > /dev/tcp/{{ .Release.Name }}-ctrl-las/18766) >/dev/null 2>&1
+                if [ $? -ne 0 ]; then
+                   sleep 2;
+                   echo waiting for las to be up
+                   continue
+                fi
+                echo las is up
+                break
+              done
+              #command: ["bash", "-c", "sleep 45; echo done waiting for rls; exit 0"]
+          #command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo {{ .Release.Name }}-ctrl-rls:9102 ; echo exit | curl  -s telnet://{{ .Release.Name }}-ctrl-rls:9102 --output /dev/null; if [ $? != 0 ]; then echo waiting for rlsserver; else echo rlsserver ready; exit 0; fi; done; echo no rlsserver; exit 1"]
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            {{- range $key, $value := .Values.image.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          volumeMounts:
+            - name: dev-isgx
+              mountPath: /dev/isgx
+            - name: cascas
+              mountPath: /etc/cas/cas.toml
+              subPath: cas.toml
+            - name: casaud
+              mountPath: /etc/cas/cas-default-owner-config.toml
+              subPath: cas-default-owner-config.toml
+          ports:
+            - name: http
+              containerPort: 18765
+              protocol: TCP
+            - name: http1
+              containerPort: 8081
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: dev-isgx
+          hostPath:
+          #path: /dev/isgx
+            path: /dev/tpm0123
+        - name: cascas
+          configMap:
+            name: cas-cas
+        - name: casaud
+          configMap:
+            name: cas-aud
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "{{ include "ssp-lls.fullname" . }}-test-connection"
+  labels:
+    {{- include "ssp-lls.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  containers:
+    - name: wget
+      image: busybox
+      command: ['wget']
+      args: ['{{ include "ssp-lls.fullname" . }}:{{ .Values.service.port }}']
+  restartPolicy: Never

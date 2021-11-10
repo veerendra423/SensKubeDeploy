@@ -1,0 +1,12 @@
+# Default values for senspcharts.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+algo-prep:
+   parentchartrel: ""
+   sconecasaddr: ""
+   localregaddr: ""
+
+algo-run:
+   sconecasaddr: ""
+   pipelineid: ""

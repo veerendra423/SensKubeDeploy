@@ -1,0 +1,76 @@
+{{- $dot := . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sens-ras.fullname" . }}
+  labels:
+    {{- include "sens-ras.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "sens-ras.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "sens-ras.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "sens-ras.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: check-mdb
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo abc | curl  -s telnet://{{ .Release.Name }}-{{ .Values.checkmdb.dbname }}:{{ .Values.checkmdb.dbport }} --output /dev/null; if [ $? != 0 ]; then echo waiting for db; else echo db ready; exit 0; fi; done; echo no db; exit 1"]
+        - name: checkcas
+          image: sensoriant.azurecr.io/dev/minlin:latest
+          command: ["bash", "-c", "for i in {1..100}; do sleep 2; echo exit | curl  -s telnet://{{ .Release.Name }}-{{ .Values.checkcas.name }}:{{ .Values.checkcas.port }} --output /dev/null; if [ $? != 0 ]; then echo waiting for cas; else echo cas ready; exit 0; fi; done; echo no cas; exit 1"]
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.pullPolicy }}
+          env:
+            {{- range $key, $value := .Values.image.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+            - name: SENSORIANT_SPIRE_SERVER_PLATFORM_NAME_WHITELIST
+              value: '["{{ .Values.sboxname }}"]'
+            {{- range $key, $value := .Values.image.serviceEnv }}
+            - name: {{ $key }}
+              value: {{ $dot.Release.Name }}-{{ $value }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.image.containerPort }}
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+
+

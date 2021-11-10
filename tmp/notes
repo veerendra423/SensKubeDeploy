@@ -1,0 +1,47 @@
+
+helm repo add prefecthq https://prefecthq.github.io/server/
+helm repo update
+helm install prefecthq/prefect-server --generate-name --set jobs.createTenant.enabled=true
+
+
+./stern -E ".*api-scli.*" -n default "s1-.*" --since 5m
+
+## scripts for doing things concurrently using parallel
+https://gist.github.com/CMCDragonkai/5914e02df62137e47f32
+
+ 2806  az network dns zone list
+ 2807  az network dns zone create -g testresg -n senstst.net
+ 2808  az network dns zone list
+ 2809  az network dns zone list -o table
+ 2811  az network dns record-set a add-record -g testresg -z senstst.net -n apitst -a 40.88.234.89
+ 2812  az network dns zone list -g testresg -n senstst.net
+ 2813  az network dns zone list -g testresg -z senstst.net
+ 2814  az network dns record-set list -g testresg -z senstst.net
+ 2815  az network dns record-set list -g testresg -z senstst.net -o table
+ 2816  az network dns record-set ns show --resource-group testresg --zone-name senstst.net --name @
+ 2817  az network dns record-set ns show --resource-group testresg --zone-name senstst.net --name @ -o table
+ 2818  az network dns record-set list -g testresg -z senstst.net -o table
+ 2821  az network dns record-set a del-record -g testresg -z senstst.net -n apitst -a 40.88.234.89
+ 2822  az network dns record-set --help
+ 2823  az network dns record-set a --help
+ 2824  az network dns record-set a delete --help
+ 2825  az network dns record-set a delete -g testresg -z senstst.net -n apitst -a 40.88.234.89
+ 2826  az network dns record-set a delete -g testresg -z senstst.net -n apitst
+ 2827  az network dns zone delete -g testresg -n senstst.net
+
+
+az aks get-credentials --resource-group OpuslogicaDemo --name mk8s3-demo
+kubectl get context
+kubectl config get-contexts
+kubectl config use-context mk8s3-pk
+kubectl config current-context
+
+pramod@sensdevel2:~/k8s/SensKubeDeploy (attestedpushpull)$ kubectl get nodes -o wide
+NAME                            STATUS   ROLES   AGE   VERSION    INTERNAL-IP   EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION     CONTAINER-RUNTIME
+aks-nplpk-22627990-vmss000000   Ready    agent   6d    v1.18.14   10.240.0.4    <none>        Ubuntu 18.04.5 LTS   5.4.0-1043-azure   docker://19.3.14
+aks-nplpk-22627990-vmss000001   Ready    agent   6d    v1.18.14   10.240.0.5    <none>        Ubuntu 18.04.5 LTS   5.4.0-1046-azure   docker://19.3.14
+
+
+gcloud compute machine-types list
+
+gcloud container get-server-config
